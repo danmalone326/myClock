@@ -4,8 +4,21 @@
 /* stack initialize the services in setup and
  * should serve in loop continueously
  */
-
+#define TZ              -8       // (utc + TZ in hours)
+#define TZ_MN           ((TZ)*60)
+#define TZ_SEC          ((TZ)*3600)
+#define DST_MN          60      // use 60 for summer time in some countries
+#define DST_SEC         ((DST_MN)*60)
 #include <EwingsEsp8266Stack.h>
+
+#include <Timezone.h>   // https://github.com/JChristensen/Timezone
+// US Pacific Time Zone (New York, Detroit)
+TimeChangeRule myDST = {"PDT", Second, Sun, Mar, 2, -420};    // Daylight time = UTC - 4 hours
+TimeChangeRule mySTD = {"PST", First, Sun, Nov, 2, -480};     // Standard time = UTC - 5 hours
+Timezone myTZ(myDST, mySTD);
+TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
+
+
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
 #include <SPI.h>
@@ -22,6 +35,7 @@ void setup() {
   Serial.begin(115200);
 
   EwStack.initialize();
+  __nw_time_service.init_ntp_time();
 
 // OTA Setup
   ArduinoOTA.onStart([]() {
@@ -67,20 +81,29 @@ void setup() {
   myDisplay.setIntensity(0);
   // Clear the display:
   myDisplay.displayClear();
-  myDisplay.setTextAlignment(PA_CENTER);
+  myDisplay.setTextAlignment(PA_LEFT);
 }
 
 unsigned long myTime = 0;
 unsigned long lastTime = 0;
 
 void loop() {
+  // Handle OTA updates
   ArduinoOTA.handle();
 
+  // Framework loop
   EwStack.serve();
 
-  myTime = millis() / 25;
+  // custom code starts here
+  char timeStr[20];
+  time_t t = __nw_time_service.get_ntp_time();
+  time_t local = myTZ.toLocal(t, &tcr);
+  struct tm *lt = gmtime(&local);
+  strftime(timeStr, sizeof timeStr, "%H:%M", lt); 
+
+  myTime = millis() / 1000;
   if (myTime > lastTime) { 
     lastTime = myTime;
-    myDisplay.print(myTime);
+    myDisplay.print(timeStr);
   }
 }
