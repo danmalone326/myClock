@@ -1,5 +1,6 @@
 // for OTA updates
 #include <ArduinoOTA.h>
+#include <dhtnew.h>
 
 /* stack initialize the services in setup and
  * should serve in loop continueously
@@ -27,6 +28,9 @@ TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ ab
 #include "clockFont.h"
 #include "myFont.h"
 
+#include <OneButton.h>
+#define BUTTON_PIN 4
+OneButton button;
 
 // Hardware SPI:
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
@@ -377,6 +381,64 @@ void timeLoopOrig() {
   mx.update();
 }
 
+DHTNEW dhtSensor(5);
+float dhtHumidity = 0.0;
+float dhtTemperature = 0.0;
+float dhtTemperatureF = 0.0;
+unsigned long dhtDisplayChangeMillis = 3000;
+int count = 3;
+
+unsigned long dhtLastMillis = 0;
+unsigned long dhtDelayMillis = 2000;
+void dhtLoop() {
+  if ((millis() >= dhtLastMillis + dhtDelayMillis) || (millis() < dhtLastMillis)) {
+    dhtLastMillis = millis();
+    int chk = dhtSensor.read();
+    dhtHumidity = dhtSensor.getHumidity();
+    dhtTemperature = dhtSensor.getTemperature();
+    dhtTemperatureF = (dhtTemperature * 9 / 5) + 32;
+  }
+
+  char displayStr[20];
+  switch ((millis() / (dhtDisplayChangeMillis * count)) %count) {
+    case 0: 
+      sprintf(displayStr,"%c%.0f%cC", (char)150, dhtTemperature, (char)144);
+      break;
+    case 1:
+      if (dhtTemperatureF < 100.0) {
+        sprintf(displayStr,"%c%.0f%cF", (char)150, dhtTemperatureF, (char)144);
+      } else {
+        sprintf(displayStr,"%.0f%cF", dhtTemperatureF, (char)144);      
+      }
+      break;
+    case 2:
+      sprintf(displayStr,"%.1f%%", dhtHumidity);
+      break;
+    
+  }
+  myDisplay.print(displayStr);
+  mx.update();
+}
+
+uint8_t displayState = 0;
+#define displayStates 2;
+
+void incrementDisplayState() {
+  displayState = (displayState + 1) % displayStates;
+  Serial.println(displayState);
+}
+
+void displayLoop() {
+  switch (displayState) {
+    case 0:
+      timeLoop();
+      break;
+    case 1:
+      dhtLoop();
+      break;
+  }
+}
+
 
 void setup() {
   Serial.begin(115200);
@@ -427,12 +489,23 @@ void setup() {
 
    // Intialize the object:
   myDisplay.begin();
-  myDisplay.setFont(clockFont);
+//  myDisplay.setFont(clockFont);
+  myDisplay.setFont(fourWide);
+//  myDisplay.setFont(threeBySeven);
+  
   // Set the intensity (brightness) of the display (0-15):
   myDisplay.setIntensity(0);
   // Clear the display:
   myDisplay.displayClear();
   myDisplay.setTextAlignment(PA_LEFT);
+
+  button = OneButton(
+    BUTTON_PIN,  // Input pin for the button
+    true,        // Button is active LOW
+    true         // Enable internal pull-up resistor
+  );
+  button.attachClick(incrementDisplayState);
+
 }
 
 
@@ -445,8 +518,20 @@ void loop() {
   // Framework loop
   EwStack.serve();
 
+  button.tick();
+//  if (button.isLongPressed()) {
+//    Serial.println("Long");
+//  }
+//  if (digitalRead(BUTTON_PIN) == HIGH) {     
+//    Serial.println ("1");
+//  } else {
+//    Serial.println ("0");
+//  }
+
   // custom code starts here
-  timeLoop();
+  displayLoop();
+//  timeLoop();
+//  dhtLoop();
 //  char timeStr[20];
 //  time_t t;
 //  time_t local;
