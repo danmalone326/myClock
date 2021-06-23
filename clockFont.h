@@ -298,7 +298,7 @@ MD_MAX72XX::fontType_t fourWide[] PROGMEM =
   0,  // 34      
   0,  // 35      
   0,  // 36      
-  0,  // 37      
+  4, 102, 22, 104, 102,   // 37 - '%'
   0,  // 38      
   0,  // 39      
   0,  // 40      
@@ -307,7 +307,7 @@ MD_MAX72XX::fontType_t fourWide[] PROGMEM =
   0,  // 43      
   0,  // 44      
   0,  // 45      
-  0,  // 46      
+  2, 96, 96,  // 46 - '.'
   4, 96, 16, 8, 6,  // 47      - /
   4, 60, 82, 74, 60,  // 48     - 0
   4, 0, 68, 126, 64,  // 49      - 1
@@ -405,13 +405,13 @@ MD_MAX72XX::fontType_t fourWide[] PROGMEM =
   0,  // 141      
   0,  // 142      
   0,  // 143      
-  0,  // 144      
+  2, 6, 6,   // 144 - 'Degree'
   0,  // 145      
   0,  // 146      
   0,  // 147      
   0,  // 148      
   0,  // 149      
-  0,  // 150      
+  4, 0, 0, 0, 0,  // 150      
   0,  // 151      
   0,  // 152      
   0,  // 153      
@@ -437,7 +437,7 @@ MD_MAX72XX::fontType_t fourWide[] PROGMEM =
   0,  // 173      
   0,  // 174      
   0,  // 175      
-  3, 14, 10, 14,  // 176      - degrees
+  0,  // 176
   0,  // 177      
   0,  // 178      
   0,  // 179      
@@ -672,7 +672,7 @@ const MD_MAX72XX::fontType_t threeByFive[] PROGMEM = {
     0, // char 147
     0, // char 148
     0, // char 149
-    0, // char 150
+    3, 0, 0, 0, // char 150
     0, // char 151
     0, // char 152
     0, // char 153
@@ -827,7 +827,7 @@ const MD_MAX72XX::fontType_t threeBySeven[] PROGMEM = {
     3, 0x10, 0x38, 0x10, // char 43 - "+"
     3, 0x0, 0x80, 0x40, // char 44 - ","
     3, 0x10, 0x10, 0x10, // char 45 - "-"
-    3, 0x0, 0x40, 0x0, // char 46 - "."
+    1, 0x80, // char 46 - "."
     3, 0xc0, 0x30, 0xc, // char 47 - "/"
     3, 0xfe, 0x82, 0xfe, // char 48 - "0"
     3, 0x84, 0xfe, 0x80, // char 49 - "1"
@@ -925,13 +925,13 @@ const MD_MAX72XX::fontType_t threeBySeven[] PROGMEM = {
     0, // char 141
     0, // char 142
     0, // char 143
-    0, // char 144
+    1, 2, // char 144 - Degrees
     0, // char 145
     0, // char 146
     0, // char 147
     0, // char 148
     0, // char 149
-    0, // char 150
+    3, 0, 0, 0, // char 150 - fixed width space
     0, // char 151
     0, // char 152
     0, // char 153
