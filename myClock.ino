@@ -1,6 +1,4 @@
-// for OTA updates
-#include <ArduinoOTA.h>
-#include <dhtnew.h>
+
 
 /* stack initialize the services in setup and
  * should serve in loop continueously
@@ -10,7 +8,8 @@
 #define TZ_SEC          ((TZ)*3600)
 #define DST_MN          60      // use 60 for summer time in some countries
 #define DST_SEC         ((DST_MN)*60)
-#include <EwingsEsp8266Stack.h>
+//#include <EwingsEsp8266Stack.h>
+#include <EwingsEspStack.h>
 
 #include <Timezone.h>   // https://github.com/JChristensen/Timezone
 // US Pacific Time Zone (New York, Detroit)
@@ -28,9 +27,6 @@ TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ ab
 #include "clockFont.h"
 #include "myFont.h"
 
-#include <OneButton.h>
-#define BUTTON_PIN 4
-OneButton button;
 
 // Hardware SPI:
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
@@ -41,33 +37,6 @@ MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
 // Create a new instance of the MD_Parola class with hardware SPI connection:
 MD_Parola myDisplay = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
-
-byte smallDigit[20][4] = 
-{
-  {0x36,0x41,0x41,0x36},
-  {0x00,0x00,0x00,0x36},
-  {0x30,0x49,0x49,0x06},
-  {0x00,0x49,0x49,0x36},
-  {0x06,0x08,0x08,0x36},
-  {0x06,0x49,0x49,0x30},
-  {0x36,0x49,0x49,0x30},
-  {0x00,0x01,0x01,0x36},
-  {0x36,0x49,0x49,0x36},
-  {0x06,0x49,0x49,0x36},
-  {0x36,0x09,0x09,0x36},
-  {0x36,0x48,0x48,0x30},
-  {0x36,0x41,0x41,0x00},
-  {0x30,0x48,0x48,0x36},
-  {0x36,0x49,0x49,0x00},
-  {0x36,0x09,0x09,0x00}
-};
-
-void displaySmallDigit(uint8_t digit, uint8_t startColumn) {
-  uint8_t column = startColumn;
-  for(int column = startColumn; ((column>=0) && (column>(startColumn-4))); column--) {
-    mx.setColumn(column,smallDigit[digit][startColumn-column]);  
-  }
-}
 
 uint16_t findCharacter(uint8_t targetCharacter, MD_MAX72XX::fontType_t font[]) {
   uint8_t fontFormatVersion;
@@ -189,82 +158,32 @@ void testOverlay(char *timeStr) {
   mx.update();
 }
 
-void bounce()
-// Animation of a bouncing ball
-{
-  const int minC = 0;
-  const int maxC = mx.getColumnCount()-1;
-  const int minR = 0;
-  const int maxR = ROW_SIZE-1;
-
-  int  nCounter = 0;
-
-  int  r = 0, c = 2;
-  int8_t dR = 1, dC = 1;  // delta row and column
-
-  mx.clear();
-
-  while (nCounter++ < 100)
-  {
-    mx.setPoint(r, c, false);
-    r += dR;
-    c += dC;
-    mx.setPoint(r, c, true);
-    delay(DELAYTIME/2);
-
-    if ((r == minR) || (r == maxR))
-      dR = -dR;
-    if ((c == minC) || (c == maxC))
-      dC = -dC;
-  }
-}
-
+bool matrixTestComplete = false;
 void matrixTest() {
+  static unsigned long startMillis = millis();
+  uint16_t testDuration = 1000;
   uint16_t rows;
   uint16_t columns;
 
   rows = 8;
   columns = mx.getColumnCount();
 
-  mx.update(MD_MAX72XX::OFF);
-  for (int i = 0; i < rows; i++) {
+  uint16_t currentColumn = (millis() - startMillis) / (testDuration / columns);
+
+  if (currentColumn >= columns) {
+    matrixTestComplete = true;
+  } else {
+    mx.update(MD_MAX72XX::OFF);
+  
     mx.clear();
-    mx.setRow(i,0xff);
-    mx.transform(MD_MAX72XX::TFUD);
+    mx.setRow(currentColumn/(columns/rows),0xff);
+    mx.setColumn(currentColumn,0xff);
     mx.update();
-    delay(1000/rows);
-  }
-  for (int i = 0; i < columns; i++) {
+  
     mx.clear();
-    mx.setRow(i/(columns/rows),0xff);
-    mx.setColumn(i,0xff);
-    mx.update();
-    delay(1000/columns);
   }
-  mx.clear();
 }
 
-void binaryTick(unsigned long mil) {
-  union mt
-  {
-     unsigned long value;
-     uint8_t bytes[4];
-  };
-
-  mt myT;
-
-  myT.value=mil;
-  
-  int  nCounter = 0;
-  
-  mx.clear();
-
-  while (nCounter < 4)
-  {
-    mx.setColumn(nCounter,myT.bytes[nCounter]); 
-    nCounter++;
-  }
-}
 
 void timeMilitaryZone(struct tm *timeStruct, unsigned long currentMilliSeconds, char timeZoneString[]) {
   char timeStr[20];
@@ -381,16 +300,18 @@ void timeLoopOrig() {
   mx.update();
 }
 
+
+// DHT Sensor 
+#include <dhtnew.h>
 DHTNEW dhtSensor(5);
+#define dhtDelayMillis 2000
+
 float dhtHumidity = 0.0;
 float dhtTemperature = 0.0;
 float dhtTemperatureF = 0.0;
-unsigned long dhtDisplayChangeMillis = 3000;
-int count = 3;
 
-unsigned long dhtLastMillis = 0;
-unsigned long dhtDelayMillis = 2000;
-void dhtLoop() {
+void dhtRead() {
+  static unsigned long dhtLastMillis = 0;
   if ((millis() >= dhtLastMillis + dhtDelayMillis) || (millis() < dhtLastMillis)) {
     dhtLastMillis = millis();
     int chk = dhtSensor.read();
@@ -398,26 +319,60 @@ void dhtLoop() {
     dhtTemperature = dhtSensor.getTemperature();
     dhtTemperatureF = (dhtTemperature * 9 / 5) + 32;
   }
+}
+
+void dhtTemperatureString(char *str) {
+  sprintf(str,"%c%.0f%cC", (char)150, dhtTemperature, (char)144);
+}
+
+void dhtTemperatureFString(char *str) {
+  if (dhtTemperatureF < 100.0) {
+    sprintf(str,"%c%.0f%cF", (char)150, dhtTemperatureF, (char)144);
+  } else {
+    sprintf(str,"%.0f%cF", dhtTemperatureF, (char)144);      
+  }
+}
+
+void dhtHumidityString(char *str) {
+  sprintf(str,"%.1f%%", dhtHumidity);
+}
+
+
+void dhtLoop() {
+  unsigned long dhtDisplayChangeMillis = 3000;
+  int count = 3;
+  dhtRead();
 
   char displayStr[20];
   switch ((millis() / (dhtDisplayChangeMillis * count)) %count) {
     case 0: 
-      sprintf(displayStr,"%c%.0f%cC", (char)150, dhtTemperature, (char)144);
+      dhtTemperatureString(displayStr);
       break;
     case 1:
-      if (dhtTemperatureF < 100.0) {
-        sprintf(displayStr,"%c%.0f%cF", (char)150, dhtTemperatureF, (char)144);
-      } else {
-        sprintf(displayStr,"%.0f%cF", dhtTemperatureF, (char)144);      
-      }
+      dhtTemperatureFString(displayStr);
       break;
     case 2:
-      sprintf(displayStr,"%.1f%%", dhtHumidity);
+      dhtHumidityString(displayStr);
       break;
-    
   }
   myDisplay.print(displayStr);
   mx.update();
+}
+
+// end of DHT Sensor
+
+// Choose what to display based on settings/button
+#include <OneButton.h>
+#define BUTTON_PIN 4
+OneButton button;
+
+void buttonSetup() {
+  button = OneButton(
+    BUTTON_PIN,  // Input pin for the button
+    true,        // Button is active LOW
+    true         // Enable internal pull-up resistor
+  );
+  button.attachClick(incrementDisplayState);
 }
 
 uint8_t displayState = 0;
@@ -439,14 +394,12 @@ void displayLoop() {
   }
 }
 
+// End Display/button
 
-void setup() {
-  Serial.begin(115200);
+// for OTA updates
+#include <ArduinoOTA.h>
 
-  EwStack.initialize();
-  __nw_time_service.init_ntp_time();
-
-// OTA Setup
+void arduinoOtaSetup() {
   ArduinoOTA.onStart([]() {
     String type;
     if (ArduinoOTA.getCommand() == U_FLASH) {
@@ -482,10 +435,21 @@ void setup() {
   Serial.println("Ready");
   Serial.print("IP address: ");
   Serial.println(WiFi.localIP());
-// End OTA Setup
+}
 
+// end of OTA handler
+
+
+void setup() {
+  Serial.begin(115200);
+
+  EwStack.initialize();
+  __nw_time_service.init_ntp_time();
+
+  arduinoOtaSetup();
+  
   mx.begin();
-  matrixTest();
+//  matrixTest();
 
    // Intialize the object:
   myDisplay.begin();
@@ -499,19 +463,11 @@ void setup() {
   myDisplay.displayClear();
   myDisplay.setTextAlignment(PA_LEFT);
 
-  button = OneButton(
-    BUTTON_PIN,  // Input pin for the button
-    true,        // Button is active LOW
-    true         // Enable internal pull-up resistor
-  );
-  button.attachClick(incrementDisplayState);
-
+  buttonSetup();
 }
 
-
-
 void loop() {
-
+  // handle all the libraries first
   // Handle OTA updates
   ArduinoOTA.handle();
 
@@ -519,45 +475,11 @@ void loop() {
   EwStack.serve();
 
   button.tick();
-//  if (button.isLongPressed()) {
-//    Serial.println("Long");
-//  }
-//  if (digitalRead(BUTTON_PIN) == HIGH) {     
-//    Serial.println ("1");
-//  } else {
-//    Serial.println ("0");
-//  }
 
-  // custom code starts here
-  displayLoop();
-//  timeLoop();
-//  dhtLoop();
-//  char timeStr[20];
-//  time_t t;
-//  time_t local;
-//  struct tm *lt;
-//  time_t t = __nw_time_service.get_ntp_time();
-//  time_t local = myTZ.toLocal(t, &tcr);
-//  struct tm *lt = gmtime(&local);
-//  strftime(timeStr, sizeof timeStr, "%H:%M", lt); 
-//
-//  showColon = ((millis() / 500) % 2) == 0;
-//  if (true) { 
-//    t = __nw_time_service.get_ntp_time();
-//    local = myTZ.toLocal(t, &tcr);
-//    lt = gmtime(&local);
-//    if (showColon) {
-//      strftime(timeStr, sizeof timeStr, "%H:%M", lt); 
-//    } else {
-//      strftime(timeStr, sizeof timeStr, "%H %M", lt);      
-//    }
-//    strftime(timeStr, sizeof timeStr, "%S", lt);      
-//    testOverlay(timeStr);
-//    
-//    myDisplay.print(timeStr);
-//    displaySmallDigit((millis()/1000)%16,4);
-//    mx.update();
-//    binaryTick(millis());
-//    lastColon = showColon;
-//  }
+  // my code starts here
+  if (matrixTestComplete) {
+    displayLoop();
+  } else {
+    matrixTest();
+  }
 }
