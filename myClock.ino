@@ -27,6 +27,8 @@ TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ ab
 #include "clockFont.h"
 #include "myFont.h"
 
+#include <string.h>
+
 
 // Hardware SPI:
 #define HARDWARE_TYPE MD_MAX72XX::FC16_HW
@@ -184,52 +186,14 @@ void matrixTest() {
   }
 }
 
-
-void timeMilitaryZone(struct tm *timeStruct, unsigned long currentMilliSeconds, char timeZoneString[]) {
-  char timeStr[20];
-
-  strftime(timeStr, sizeof timeStr, "%H%M ", timeStruct); 
-  strcat(timeStr, timeZoneString);
-
-  myDisplay.print(timeStr);
-  mx.update();
-}
-
-void time24Hour(struct tm *timeStruct, unsigned long currentMilliSeconds, char timeZoneString[]) {
-  char timeStr[20];
-
-  if (currentMilliSeconds < 500) {
-    strftime(timeStr, sizeof timeStr, "%H:%M", timeStruct); 
-  } else {
-    strftime(timeStr, sizeof timeStr, "%H %M", timeStruct); 
-  }
-
-  myDisplay.print(timeStr);
-  mx.update();
-}
-
-void time12Hour(struct tm *timeStruct, unsigned long currentMilliSeconds, char timeZoneString[])  {
-  char timeStr[20];
-
-  if (currentMilliSeconds < 500) {
-    strftime(timeStr, sizeof timeStr, "%l:%M", timeStruct); 
-  } else {
-    strftime(timeStr, sizeof timeStr, "%l %M", timeStruct); 
-  }
-
-  if(timeStr[0] == ' ') {
-    timeStr[0] = 150;
-  }
-
-  myDisplay.print(timeStr);
-  mx.update();
-}
-
-uint8_t lastSecond = 60;
-unsigned long millisLastSecondChange = 0;
-bool displayLocalTime = false;
-
-void timeLoop() {
+void timeString(char *timeStr, 
+                size_t maxsize,
+                bool showLocalTime, 
+                bool show24Hour, 
+                bool showTimeZone, 
+                bool showSeconds,
+                bool military,
+                bool flashColons) {
   time_t utcTime;
   time_t localTime;
   TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
@@ -239,6 +203,9 @@ void timeLoop() {
   unsigned long currentMilliSeconds;
 
   utcTime = __nw_time_service.get_ntp_time();
+  
+  static uint8_t lastSecond = 60;
+  static unsigned long millisLastSecondChange = 0;
   currentSecond = second(utcTime);
   if (currentSecond != lastSecond) {
     millisLastSecondChange = millis();
@@ -246,10 +213,7 @@ void timeLoop() {
   }
   currentMilliSeconds = millis() - millisLastSecondChange;
 
-  // Another way until later...
-  displayLocalTime = (currentSecond < 30);
-
-  if (displayLocalTime) {
+  if (showLocalTime) {
     localTime = myTZ.toLocal(utcTime, &tcr);
     timeStruct = gmtime(&localTime);
     strncpy(timeZoneString, tcr -> abbrev, sizeof(timeZoneString)-1 );
@@ -258,48 +222,50 @@ void timeLoop() {
     strncpy(timeZoneString, "UTC", sizeof(timeZoneString)-1 );
   }
 
-  switch (int(floor((currentSecond%30)/10))) {
-    case 0: 
-      timeMilitaryZone(timeStruct, currentMilliSeconds, timeZoneString);
-      break;
-    case 1:
-      time24Hour(timeStruct, currentMilliSeconds, timeZoneString);
-      break;
-    case 2:
-      time12Hour(timeStruct, currentMilliSeconds, timeZoneString);
-      break;
+// Now build a format string
+  char timeFormat[20] = "";
+
+  
+  char colonChar[2] = "";
+  if(!military) {
+    if (flashColons && (currentMilliSeconds < 500)) {
+      strcat(colonChar," ");
+    } else {
+      strcat(colonChar,":");
+    }
   }
-}
 
-void timeLoopOrig() {
-  time_t utcTime;
-  time_t localTime;
-  struct tm *lt;
-  char timeStr[20];
-  uint8_t currentSecond;
-  unsigned long currentMilliSeconds;
 
-  utcTime = __nw_time_service.get_ntp_time();
-  currentSecond = second(utcTime);
-  if (currentSecond != lastSecond) {
-    millisLastSecondChange = millis();
-    lastSecond = currentSecond;
-  }
-  currentMilliSeconds = millis() - millisLastSecondChange;
-
-  // Now decide which time format to display
-  localTime = myTZ.toLocal(utcTime, &tcr);
-  lt = gmtime(&localTime);
-  if (currentMilliSeconds < 500) {
-    strftime(timeStr, sizeof timeStr, "%H:%M", lt); 
+  if (show24Hour) {
+    strcat(timeFormat,"%H");
   } else {
-    strftime(timeStr, sizeof timeStr, "%H %M", lt); 
+    strcat(timeFormat,"%l");    
   }
 
-  myDisplay.print(timeStr);
-  mx.update();
-}
+  strcat(timeFormat,colonChar);
+  strcat(timeFormat,"%M");
 
+  if (showSeconds) {
+    strcat(timeFormat,colonChar);
+    strcat(timeFormat,"%S");
+  }
+
+// Print the time string
+  strftime(timeStr, maxsize, timeFormat, timeStruct); 
+
+// replace a leading space with our special mono-spaced space
+  if(timeStr[0] == ' ') {
+    timeStr[0] = 150;
+  }
+
+// append the timezone
+  if (showTimeZone) {
+    strcat(timeStr, " ");
+    strcat(timeStr, timeZoneString);
+  }
+
+  
+}
 
 // DHT Sensor 
 #include <dhtnew.h>
@@ -338,26 +304,26 @@ void dhtHumidityString(char *str) {
 }
 
 
-void dhtLoop() {
-  unsigned long dhtDisplayChangeMillis = 3000;
-  int count = 3;
-  dhtRead();
-
-  char displayStr[20];
-  switch ((millis() / (dhtDisplayChangeMillis * count)) %count) {
-    case 0: 
-      dhtTemperatureString(displayStr);
-      break;
-    case 1:
-      dhtTemperatureFString(displayStr);
-      break;
-    case 2:
-      dhtHumidityString(displayStr);
-      break;
-  }
-  myDisplay.print(displayStr);
-  mx.update();
-}
+//void dhtLoop() {
+//  unsigned long dhtDisplayChangeMillis = 3000;
+//  int count = 3;
+//  dhtRead();
+//
+//  char displayStr[20];
+//  switch ((millis() / (dhtDisplayChangeMillis * count)) %count) {
+//    case 0: 
+//      dhtTemperatureString(displayStr);
+//      break;
+//    case 1:
+//      dhtTemperatureFString(displayStr);
+//      break;
+//    case 2:
+//      dhtHumidityString(displayStr);
+//      break;
+//  }
+//  myDisplay.print(displayStr);
+//  mx.update();
+//}
 
 // end of DHT Sensor
 
@@ -372,26 +338,115 @@ void buttonSetup() {
     true,        // Button is active LOW
     true         // Enable internal pull-up resistor
   );
-  button.attachClick(incrementDisplayState);
+  button.attachClick(menuSingleClick);
+  button.attachLongPressStart(menuLongClick);
 }
 
-uint8_t displayState = 0;
-#define displayStates 2;
+uint8_t menuState = 0;
+#define menuStateNormal 0
+#define menuStateDHT 1
+#define menuStateSelect 2
+#define menuStateCount 3
 
-void incrementDisplayState() {
-  displayState = (displayState + 1) % displayStates;
-  Serial.println(displayState);
+void menuSingleClick() {
+  switch (menuState) {
+    case menuStateNormal:
+      menuState = menuStateDHT;
+      break;
+    case menuStateDHT:
+      menuState = menuStateNormal;
+      break;
+    case menuStateSelect:
+      timeFormatIncrement();
+      break;
+  }
+}
+
+void menuLongClick() {
+  switch (menuState) {
+    case menuStateNormal:
+    case menuStateDHT:
+      menuState = menuStateSelect;
+      break;
+    case menuStateSelect:
+      menuState = menuStateNormal;
+      break;
+  }
+}
+
+uint8_t timeFormat = 0;
+#define timeFormatLocal12 0
+#define timeFormatLocal24 1
+#define timeFormatUTC 2
+#define timeFormatCount 3
+
+void timeFormatIncrement() {
+  timeFormat = (timeFormat + 1) % timeFormatCount;
+}
+
+void getTimeString(char *str, size_t maxsize) {
+  switch (timeFormat) {
+    case timeFormatLocal12:
+      timeString(str, maxsize, true, false, false, true, false, true);
+//                bool showLocalTime, 
+//                bool show24Hour, 
+//                bool showTimeZone, 
+//                bool showSeconds,
+//                bool military,
+//                bool flashColons)      
+      break;
+    case timeFormatLocal24:
+      timeString(str, maxsize, true, true, false, true, false, true);
+      break;
+    case timeFormatUTC:
+      timeString(str, maxsize, false, true, false, true, true, true);
+      break;
+  }  
+}
+
+// Display duration for temp and humidity in milliseconds
+#define displayTempDuration 6000
+void getDHTString(char *str, size_t maxsize) {
+  static bool active = false;
+  static unsigned long startMillis = 0;
+
+  dhtRead();
+
+  if (!active) {
+    active = true;
+    startMillis = millis();
+  }
+
+  switch ((millis() - startMillis) / (displayTempDuration/2)) {
+    case 0:
+      dhtTemperatureFString(str);
+      break;
+    case 1:
+      dhtHumidityString(str);
+      break;
+    case 2:
+      active = false;
+      menuState = menuStateNormal;
+      break;
+  }  
 }
 
 void displayLoop() {
-  switch (displayState) {
-    case 0:
-      timeLoop();
+  char displayStr[20];
+  strcpy(displayStr,"");
+  switch (menuState) {
+    case menuStateNormal:
+      getTimeString(displayStr, sizeof displayStr);
       break;
-    case 1:
-      dhtLoop();
+    case menuStateDHT:
+      getDHTString(displayStr, sizeof displayStr);
+      break;
+    case menuStateSelect:
+      getTimeString(displayStr, sizeof displayStr);
       break;
   }
+  myDisplay.print(displayStr);
+  mx.update();
 }
 
 // End Display/button
@@ -467,6 +522,8 @@ void setup() {
 }
 
 void loop() {
+  static unsigned long millisLastDisplay = 0;
+  
   // handle all the libraries first
   // Handle OTA updates
   ArduinoOTA.handle();
@@ -478,7 +535,10 @@ void loop() {
 
   // my code starts here
   if (matrixTestComplete) {
-    displayLoop();
+    if (millis() > millisLastDisplay+ 100) {
+      millisLastDisplay = millis();
+      displayLoop();
+    }
   } else {
     matrixTest();
   }
