@@ -269,7 +269,8 @@ void timeString(char *timeStr,
 
 // DHT Sensor 
 #include <dhtnew.h>
-DHTNEW dhtSensor(5);
+#define dhtSensorPin D3
+DHTNEW dhtSensor(dhtSensorPin);
 #define dhtDelayMillis 2000
 
 float dhtHumidity = 0.0;
@@ -304,37 +305,16 @@ void dhtHumidityString(char *str) {
 }
 
 
-//void dhtLoop() {
-//  unsigned long dhtDisplayChangeMillis = 3000;
-//  int count = 3;
-//  dhtRead();
-//
-//  char displayStr[20];
-//  switch ((millis() / (dhtDisplayChangeMillis * count)) %count) {
-//    case 0: 
-//      dhtTemperatureString(displayStr);
-//      break;
-//    case 1:
-//      dhtTemperatureFString(displayStr);
-//      break;
-//    case 2:
-//      dhtHumidityString(displayStr);
-//      break;
-//  }
-//  myDisplay.print(displayStr);
-//  mx.update();
-//}
-
 // end of DHT Sensor
 
 // Choose what to display based on settings/button
 #include <OneButton.h>
-#define BUTTON_PIN 4
+#define buttonPin D4
 OneButton button;
 
 void buttonSetup() {
   button = OneButton(
-    BUTTON_PIN,  // Input pin for the button
+    buttonPin,   // Input pin for the button
     true,        // Button is active LOW
     true         // Enable internal pull-up resistor
   );
