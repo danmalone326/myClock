@@ -1,8 +1,11 @@
 
+#include <Wire.h>   // for I2C protocol
+#include <ds3231.h>
 
-/* stack initialize the services in setup and
- * should serve in loop continueously
- */
+// For testing
+#define  DELAYTIME  25  // in milliseconds
+
+
 #define TZ              -8       // (utc + TZ in hours)
 #define TZ_MN           ((TZ)*60)
 #define TZ_SEC          ((TZ)*3600)
@@ -17,8 +20,6 @@ TimeChangeRule myDST = {"PDT", Second, Sun, Mar, 2, -420};    // Daylight time =
 TimeChangeRule mySTD = {"PST", First, Sun, Nov, 2, -480};     // Standard time = UTC - 5 hours
 Timezone myTZ(myDST, mySTD);
 TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
-
-#define  DELAYTIME  25  // in milliseconds
 
 #include <MD_Parola.h>
 #include <MD_MAX72xx.h>
@@ -186,6 +187,30 @@ void matrixTest() {
   }
 }
 
+// get time from RTC and format
+void rtcString(char *timeStr, 
+               size_t maxsize, 
+               bool showTime,
+               bool showDate) {
+  static ts t; // time struct
+  static float treg;
+  DS3231_get(&t);
+  treg = DS3231_get_treg();
+
+
+  if (showTime) {
+    sprintf(timeStr,"%d:%d:%d", t.hour,t.min,t.sec);
+  } else if (showDate) {
+    sprintf(timeStr,"%d/%d/%d", t.mon,t.mday,t.year);    
+  } else {
+    sprintf(timeStr,"%f", treg);    
+  }
+  
+  return;
+}
+
+
+// get current time in a format based on the parameters
 void timeString(char *timeStr, 
                 size_t maxsize,
                 bool showLocalTime, 
@@ -358,7 +383,10 @@ uint8_t timeFormat = 0;
 #define timeFormatLocal12 0
 #define timeFormatLocal24 1
 #define timeFormatUTC 2
-#define timeFormatCount 3
+#define timeFormatRTC 3
+#define timeFormatRTCdate 4
+#define timeFormatRTCtemp 5
+#define timeFormatCount 6
 
 void timeFormatIncrement() {
   timeFormat = (timeFormat + 1) % timeFormatCount;
@@ -381,8 +409,22 @@ void getTimeString(char *str, size_t maxsize) {
     case timeFormatUTC:
       timeString(str, maxsize, false, true, false, true, true, true);
       break;
+    case timeFormatRTC:
+      rtcString(str, maxsize, true, false);
+      break;
+    case timeFormatRTCdate:
+      rtcString(str, maxsize, false, true);
+      break;
+    case timeFormatRTCtemp:
+      rtcString(str, maxsize, false, false);
+      break;
   }  
 }
+
+//void rtcString(char *timeStr, 
+//               size_t maxsize, 
+//               bool showTime,
+//               bool showDate) {
 
 // Display duration for temp and humidity in milliseconds
 #define displayTempDuration 6000
@@ -481,8 +523,9 @@ void setup() {
   EwStack.initialize();
   __nw_time_service.init_ntp_time();
 
-  arduinoOtaSetup();
-  
+  Wire.begin(); // starting I2C for RTC
+  DS3231_init(DS3231_INTCN); //register the ds3231 at the default address
+
   mx.begin();
 //  matrixTest();
 
@@ -499,6 +542,9 @@ void setup() {
   myDisplay.setTextAlignment(PA_LEFT);
 
   buttonSetup();
+
+  // This is at the end to give wifi time to connect
+  arduinoOtaSetup();
 }
 
 void loop() {
