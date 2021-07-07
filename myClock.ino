@@ -16,12 +16,12 @@
 
 #include <Timezone.h>   // https://github.com/JChristensen/Timezone
 // US Pacific Time Zone (New York, Detroit)
-TimeChangeRule myDST = {"PDT", Second, Sun, Mar, 2, -420};    // Daylight time = UTC - 4 hours
-TimeChangeRule mySTD = {"PST", First, Sun, Nov, 2, -480};     // Standard time = UTC - 5 hours
+TimeChangeRule myDST = {"PDT", Second, Sun, Mar, 2, -420};    // Daylight time = UTC - 7 hours
+TimeChangeRule mySTD = {"PST", First, Sun, Nov, 2, -480};     // Standard time = UTC - 8 hours
 Timezone myTZ(myDST, mySTD);
 TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
 
-#include <MD_Parola.h>
+//#include <MD_Parola.h>
 #include <MD_MAX72xx.h>
 #include <SPI.h>
 
@@ -32,74 +32,22 @@ TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ ab
 
 
 // Hardware SPI:
-#define HARDWARE_TYPE MD_MAX72XX::FC16_HW
+#define HARDWARE_TYPE MD_MAX72XX::DR1CR0RR1_HW //FC16_HW
 #define MAX_DEVICES 4
 #define CS_PIN 15
 
 MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 
-// Create a new instance of the MD_Parola class with hardware SPI connection:
-MD_Parola myDisplay = MD_Parola(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
+// Found the function in MD_MAX72XX to get the character - getChar
+//   uint8_t characterWidth = mx.getChar(character, characterBufferSize, characterBuffer);
 
-uint16_t findCharacter(uint8_t targetCharacter, MD_MAX72XX::fontType_t font[]) {
-  uint8_t fontFormatVersion;
-  uint8_t fontFirstCharacter;
-  uint8_t fontLastCharacter;
-  uint8_t fontHeight;
-
-  uint8_t currentCharacter; 
-  uint16_t fontIndex;
-  uint16_t result;
-
-//  Serial.println("findCharacter");
-  if (pgm_read_byte_near(font) == 'F') {
-    fontFormatVersion = pgm_read_byte_near(font+1);
-    if (fontFormatVersion == 1) {
-      fontFirstCharacter = pgm_read_byte_near(font+2);
-      fontLastCharacter = pgm_read_byte_near(font+3);
-      fontHeight = pgm_read_byte_near(font+4);
-      fontIndex = 5;
-    } else {
-      fontFirstCharacter = 0;
-      fontLastCharacter = 255;
-      fontHeight = 8;    
-      fontIndex = 7;
-    }
-  } else {
-    fontFormatVersion = 0;
-    fontFirstCharacter = 0;
-    fontLastCharacter = 255;
-    fontHeight = 8;
-    fontIndex = 0;
-  }
-//  Serial.println(fontFormatVersion);
-
-  currentCharacter = fontFirstCharacter;
-  result = fontIndex;
-
-//  Serial.println(targetCharacter);
-  while (currentCharacter < fontLastCharacter) {
-//    Serial.println(currentCharacter);
-//    Serial.println(pgm_read_byte_near(clockFont+characterPos));
-    if (currentCharacter == targetCharacter) {
-      result = fontIndex;
-      break;
-    }
-    fontIndex += 1 + pgm_read_byte_near(font+fontIndex);
-    currentCharacter += 1;
-  }
-//  Serial.println(currentCharacter);
-//  Serial.println(result);
-
-  return result;
-}
-
-void overlayCharacter(byte character, int8_t startColumn, int8_t startRow, MD_MAX72XX::fontType_t font[]) {
+#define columnOffset 0
+#define characterBufferSize 8
+uint8_t overlayCharacter(uint16_t character, int8_t startColumn, int8_t startRow) {
 //  Serial.println("overlayCharacter");
 
-  uint16_t characterStartPos = findCharacter(character, font);
-  uint8_t characterWidth = pgm_read_byte_near(font+characterStartPos);
-  uint16_t characterFirstColumn = characterStartPos + 1;
+  uint8_t characterBuffer[characterBufferSize];
+  uint8_t characterWidth = mx.getChar(character, characterBufferSize, characterBuffer);
 
   uint8_t currentColumn;
   uint8_t updatedColumn;
@@ -107,8 +55,8 @@ void overlayCharacter(byte character, int8_t startColumn, int8_t startRow, MD_MA
 
 //  Serial.println(characterWidth);
   for (int relativeColumn = 0; relativeColumn < characterWidth; relativeColumn++) {
-    currentColumn = startColumn - relativeColumn;
-    shiftedCharacter = pgm_read_byte_near(font+characterFirstColumn+relativeColumn);
+    currentColumn = startColumn + relativeColumn;
+    shiftedCharacter = characterBuffer[relativeColumn];
     if (startRow > 0) {
       shiftedCharacter = shiftedCharacter << startRow;
     } else {
@@ -118,48 +66,63 @@ void overlayCharacter(byte character, int8_t startColumn, int8_t startRow, MD_MA
 
     mx.setColumn(currentColumn, updatedColumn);
   }
+
+  return characterWidth;
 }
 
-char currentChar = ' ';
-unsigned long currentCharMillis=0;
-
-void testOverlay(char *timeStr) {
-//  Serial.println("testOverlay");
-//  Serial.println(clockFont[0]);
-//  Serial.println(sizeof(clockFont));
-
-  if (timeStr[1] != currentChar) {
-    currentChar = timeStr[1];
-    currentCharMillis = millis();
+void printOver(char *str, int8_t startColumn, int8_t startRow) {
+  uint8_t currentColumn = startColumn;
+ 
+  for(int characterCounter=0; str[characterCounter]; characterCounter++) {
+    currentColumn += overlayCharacter(str[characterCounter],currentColumn,startRow);
+    currentColumn += 1;
   }
-  uint16_t scrollPos = (((millis() - currentCharMillis) % 1000) * 16 / 1000);
-  
-  mx.clear();
-  overlayCharacter(timeStr[0],10,0, clockFont);
-  overlayCharacter(timeStr[1],4,0, clockFont);
-  overlayCharacter(timeStr[0],26,0, clockFont);
-
-
-  unsigned long millisSinceChange = millis() - currentCharMillis;
-  if (millisSinceChange >= 150) {
-    overlayCharacter(timeStr[1],20,0, _sysfontNew);    
-  } else {
-    char previousChar;
-    if (timeStr[1] == '0') {
-      previousChar = '9';    
-    } else {
-      previousChar = timeStr[1] - 1;
-    }
-
-    uint16_t scrollPos = (millisSinceChange * 7 / 150) + 1;
-
-    overlayCharacter(previousChar,20,scrollPos, _sysfontNew);    
-    overlayCharacter(timeStr[1],20,0-8+scrollPos, _sysfontNew);    
-
-  }
-//  mx.transform(MD_MAX72XX::TFUD);
-  mx.update();
 }
+
+//char currentChar = ' ';
+//unsigned long currentCharMillis=0;
+//
+//void testOverlay(char *timeStr) {
+////  Serial.println("testOverlay");
+////  Serial.println(clockFont[0]);
+////  Serial.println(sizeof(clockFont));
+//
+//  if (timeStr[1] != currentChar) {
+//    currentChar = timeStr[1];
+//    currentCharMillis = millis();
+//  }
+//  uint16_t scrollPos = (((millis() - currentCharMillis) % 1000) * 16 / 1000);
+//  
+//  mx.clear();
+//  overlayCharacter(timeStr[0],10,0, clockFont);
+//  overlayCharacter(timeStr[1],4,0, clockFont);
+//  overlayCharacter(timeStr[0],26,0, clockFont);
+//
+//
+//  unsigned long millisSinceChange = millis() - currentCharMillis;
+//  if (millisSinceChange >= 150) {
+//    overlayCharacter(timeStr[1],20,0, _sysfontNew);    
+//  } else {
+//    char previousChar;
+//    if (timeStr[1] == '0') {
+//      previousChar = '9';    
+//    } else {
+//      previousChar = timeStr[1] - 1;
+//    }
+//
+//    uint16_t scrollPos = (millisSinceChange * 7 / 150) + 1;
+//
+//    overlayCharacter(previousChar,20,scrollPos, _sysfontNew);    
+//    overlayCharacter(timeStr[1],20,0-8+scrollPos, _sysfontNew);    
+//
+//  }
+////  mx.transform(MD_MAX72XX::TFUD);
+//  mx.update();
+//}
+
+// end of font/print handling
+
+
 
 bool matrixTestComplete = false;
 void matrixTest() {
@@ -347,6 +310,8 @@ void buttonSetup() {
   button.attachLongPressStart(menuLongClick);
 }
 
+uint8_t tempCounter = 0;
+
 uint8_t menuState = 0;
 #define menuStateNormal 0
 #define menuStateDHT 1
@@ -365,6 +330,8 @@ void menuSingleClick() {
       timeFormatIncrement();
       break;
   }
+  //TEMP
+  tempCounter++;
 }
 
 void menuLongClick() {
@@ -454,6 +421,8 @@ void getDHTString(char *str, size_t maxsize) {
 }
 
 void displayLoop() {
+  mx.clear();
+  
   char displayStr[20];
   strcpy(displayStr,"");
   switch (menuState) {
@@ -467,7 +436,8 @@ void displayLoop() {
       getTimeString(displayStr, sizeof displayStr);
       break;
   }
-  myDisplay.print(displayStr);
+
+  printOver(displayStr, -1, 0);
   mx.update();
 }
 
@@ -526,20 +496,10 @@ void setup() {
   Wire.begin(); // starting I2C for RTC
   DS3231_init(DS3231_INTCN); //register the ds3231 at the default address
 
+  // setup the matrix
   mx.begin();
-//  matrixTest();
-
-   // Intialize the object:
-  myDisplay.begin();
-//  myDisplay.setFont(clockFont);
-  myDisplay.setFont(fourWide);
-//  myDisplay.setFont(threeBySeven);
-  
-  // Set the intensity (brightness) of the display (0-15):
-  myDisplay.setIntensity(0);
-  // Clear the display:
-  myDisplay.displayClear();
-  myDisplay.setTextAlignment(PA_LEFT);
+  mx.control(MD_MAX72XX::INTENSITY,0);
+  mx.setFont(fourWide);
 
   buttonSetup();
 

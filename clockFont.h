@@ -1,3 +1,24 @@
+// Font info: https://majicdesigns.github.io/MD_MAX72XX/page_font_utility.html
+//
+// Version 1: Fonts are stored as a series of contiguous bytes in the following 
+//   format:
+//
+// byte 0 - the character 'F'
+// byte 1 - the version for the file format (1)
+// byte 2 - the first ASCII character in the table
+// byte 3 - the last ASCII character in the table
+// byte 4 - the height of the character in pixels
+// byte 5 - the number of bytes that form this character (could be zero)
+// byte 6..n - each byte is a column of the character to be formed, starting 
+//             with the leftmost column of the character. The least significant 
+//             bit of the byte is the bottom pixel position of the character 
+//             matrix (row 7).
+//
+// Version 0: If the 'F' is omitted then the font definition is considered a 
+//   version 0 font (prior to MD_MAX72xx version 3.0.0) and the defaults are 
+//   set to min ASCII 0, max ASCII 255, height 8. In this case byte 5 of the 
+//   Version 1 font is the first byte in the file.
+
 MD_MAX72XX::fontType_t clockFont[] PROGMEM = 
 {
 	0, 	// 0 - 'Empty Cell'
