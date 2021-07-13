@@ -1,0 +1,31 @@
+#!/usr/bin/python3
+#
+# A little script that helps convert font files from hex to decimal so they work in 
+# the font editor at: https://pjrp.github.io/MDParolaFontEditor
+# Also used to shift the character so it's aligned at the top.
+
+import fileinput
+
+
+shiftValue = 0
+def shift(value):
+	if (shiftValue>0):
+		return value>>shiftValue
+	else:
+		return value<<(-shiftValue)
+
+
+for line in fileinput.input():
+	data = line.rstrip("\n").split(',')
+	
+	for index,value in enumerate(data):
+		if ((index == 0) and ('F' in value)):
+			break
+		if ((index==0) or ("//" in value)):
+			pass
+		elif "0x" in value:
+			data[index] = " "+str(shift(int(value,16))&255)
+		else:
+			data[index] = " "+str(shift(int(value))&255)
+		
+	print(",".join(data))

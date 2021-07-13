@@ -3,7 +3,7 @@
 #include <ds3231.h>
 
 // For testing
-#define  DELAYTIME  25  // in milliseconds
+#define  DELAYTIME  0  // in milliseconds
 
 
 #define TZ              -8       // (utc + TZ in hours)
@@ -25,7 +25,11 @@ TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ ab
 #include <MD_MAX72xx.h>
 #include <SPI.h>
 
-#include "clockFont.h"
+//#include "clockFont.h"
+#include "threeByFiveFont.h"
+#include "threeBySevenFont.h"
+#include "fourBySixFont.h"
+#include "boldFont.h"
 #include "myFont.h"
 
 #include <string.h>
@@ -41,14 +45,28 @@ MD_MAX72XX mx = MD_MAX72XX(HARDWARE_TYPE, CS_PIN, MAX_DEVICES);
 // Found the function in MD_MAX72XX to get the character - getChar
 //   uint8_t characterWidth = mx.getChar(character, characterBufferSize, characterBuffer);
 
-#define columnOffset 0
-#define characterBufferSize 8
-uint8_t overlayCharacter(uint16_t character, int8_t startColumn, int8_t startRow) {
-//  Serial.println("overlayCharacter");
 
-  uint8_t characterBuffer[characterBufferSize];
-  uint8_t characterWidth = mx.getChar(character, characterBufferSize, characterBuffer);
+// assumes result is big enough
+// assumes width and height are the same for all
+void transitionCharacter(uint8_t *result, uint8_t *current, uint8_t *target, uint8_t width, uint8_t height, float transitionPercent, uint8_t transitionType) {
+  uint8_t heightMask = (uint8_t)(pow(2,height)-1) << (8-height);
+  uint8_t transitionPosition = transitionPercent*height;
+  uint8_t currentPart;
+  uint8_t targetPart;
 
+  switch (transitionType) {
+    default:
+      for(int i=0; i<width; i++) {
+        currentPart = current[i] << transitionPosition;
+        targetPart = target[i] >> (height-transitionPosition);
+        result[i] = (currentPart | targetPart) & heightMask;
+      }
+      break;
+  }
+}
+
+uint8_t overlayCustomCharacter(uint8_t *characterBuffer, uint8_t characterWidth, int8_t startColumn, int8_t startRow) {
+  
   uint8_t currentColumn;
   uint8_t updatedColumn;
   uint8_t shiftedCharacter;
@@ -70,6 +88,17 @@ uint8_t overlayCharacter(uint16_t character, int8_t startColumn, int8_t startRow
   return characterWidth;
 }
 
+
+#define characterBufferSize 8
+uint8_t overlayCharacter(uint16_t character, int8_t startColumn, int8_t startRow) {
+//  Serial.println("overlayCharacter");
+
+  uint8_t characterBuffer[characterBufferSize];
+  uint8_t characterWidth = mx.getChar(character, characterBufferSize, characterBuffer);
+
+  return overlayCustomCharacter(characterBuffer, characterWidth, startColumn, startRow);
+}
+
 void printOver(char *str, int8_t startColumn, int8_t startRow) {
   uint8_t currentColumn = startColumn;
  
@@ -78,47 +107,6 @@ void printOver(char *str, int8_t startColumn, int8_t startRow) {
     currentColumn += 1;
   }
 }
-
-//char currentChar = ' ';
-//unsigned long currentCharMillis=0;
-//
-//void testOverlay(char *timeStr) {
-////  Serial.println("testOverlay");
-////  Serial.println(clockFont[0]);
-////  Serial.println(sizeof(clockFont));
-//
-//  if (timeStr[1] != currentChar) {
-//    currentChar = timeStr[1];
-//    currentCharMillis = millis();
-//  }
-//  uint16_t scrollPos = (((millis() - currentCharMillis) % 1000) * 16 / 1000);
-//  
-//  mx.clear();
-//  overlayCharacter(timeStr[0],10,0, clockFont);
-//  overlayCharacter(timeStr[1],4,0, clockFont);
-//  overlayCharacter(timeStr[0],26,0, clockFont);
-//
-//
-//  unsigned long millisSinceChange = millis() - currentCharMillis;
-//  if (millisSinceChange >= 150) {
-//    overlayCharacter(timeStr[1],20,0, _sysfontNew);    
-//  } else {
-//    char previousChar;
-//    if (timeStr[1] == '0') {
-//      previousChar = '9';    
-//    } else {
-//      previousChar = timeStr[1] - 1;
-//    }
-//
-//    uint16_t scrollPos = (millisSinceChange * 7 / 150) + 1;
-//
-//    overlayCharacter(previousChar,20,scrollPos, _sysfontNew);    
-//    overlayCharacter(timeStr[1],20,0-8+scrollPos, _sysfontNew);    
-//
-//  }
-////  mx.transform(MD_MAX72XX::TFUD);
-//  mx.update();
-//}
 
 // end of font/print handling
 
@@ -251,9 +239,152 @@ void timeString(char *timeStr,
     strcat(timeStr, " ");
     strcat(timeStr, timeZoneString);
   }
-
-  
 }
+
+// Various Time Display functions
+#define timeStringSize 20
+#define scrollDuration 200
+#define scrollGap 75
+
+void displayScrollingTime() {
+  static char currentTimeStr[timeStringSize];
+  static char targetTimeStr[timeStringSize];
+  static char previousTimeStr[timeStringSize];
+  
+  static uint8_t currentCharacterBuffer[characterBufferSize];
+  static uint8_t previousCharacterBuffer[characterBufferSize];  
+  static uint8_t transitionCharacterBuffer[characterBufferSize];  
+  
+  uint8_t characterWidth;
+  uint8_t characterHeight;
+  
+  static unsigned long currentScrollStartTime = 0;
+  unsigned long currentScrollDelta = 0;
+  uint16_t thisSrollStart=0;
+  float scrollPercent = 0.0;
+  static bool scrolling;
+  bool scrollingComplete;
+
+  int displayColumn = 0;
+  int displayRow = 0;
+
+
+  if (currentScrollStartTime == 0) {  // first time only, fill with fixed space
+    memset(previousTimeStr,150,timeStringSize);
+  }
+  
+  strcpy(currentTimeStr,"");
+  getTimeString(currentTimeStr, timeStringSize);
+
+//      Serial.println("timeFormatLocal12");
+//      mx.setFont(fourBySixFont);
+//      displayColumn = -1;
+  mx.setFont(threeByFiveFont);
+  displayColumn = 0;
+  displayRow = 0;
+  characterHeight = mx.getFontHeight();
+
+
+  if (!scrolling && (strcmp(currentTimeStr,previousTimeStr) != 0)) {
+    strcpy(targetTimeStr,currentTimeStr);
+    scrolling = true;
+    currentScrollStartTime = millis();
+  }
+  currentScrollDelta = millis()-currentScrollStartTime;
+
+  scrollingComplete = true;
+  for (int i=0; i<strlen(targetTimeStr); i++) {
+    if (targetTimeStr[i] == previousTimeStr[i]) {
+      displayColumn += overlayCharacter(targetTimeStr[i],displayColumn,displayRow)+1;
+    } else { 
+      switch (i) {
+        case 0:
+          thisSrollStart=5*scrollGap;
+          break;
+        case 1:
+          thisSrollStart=4*scrollGap;
+          break;
+        case 2:
+          thisSrollStart=3.5*scrollGap;
+          break;
+        case 3:
+          thisSrollStart=3*scrollGap;
+          break;
+        case 4:
+          thisSrollStart=2*scrollGap;
+          break;
+        case 5:
+          thisSrollStart=1.5*scrollGap;
+          break;
+        case 6:
+          thisSrollStart=1*scrollGap;
+          break;
+        case 7:
+          thisSrollStart=0*scrollGap;
+          break;
+      }
+      scrollPercent = ((float)currentScrollDelta - thisSrollStart) / scrollDuration;
+      if (scrollPercent < 1.0) { scrollingComplete = false; }
+      
+//          Serial.println(scrollPercent);
+//          Serial.println(currentStartDelta);
+//          Serial.println(scrollStartDelta);
+//          Serial.println(scrollDuration);
+      
+      if (scrollPercent > 1.0) { 
+        displayColumn += overlayCharacter(currentTimeStr[i],displayColumn,displayRow)+1;
+      } else if (scrollPercent < 0.0) { 
+        displayColumn += overlayCharacter(previousTimeStr[i],displayColumn,displayRow)+1;
+      } else {
+        characterWidth = mx.getChar(currentTimeStr[i], characterBufferSize, currentCharacterBuffer);
+        mx.getChar(previousTimeStr[i], characterBufferSize, previousCharacterBuffer);
+        transitionCharacter(transitionCharacterBuffer, previousCharacterBuffer, currentCharacterBuffer, characterWidth, characterHeight, scrollPercent, 1);              
+        displayColumn += overlayCustomCharacter(transitionCharacterBuffer,characterWidth,displayColumn,displayRow)+1;
+      }
+    }
+  }
+  if (scrollingComplete) {
+    strcpy(previousTimeStr,currentTimeStr);
+    scrolling = false;
+  }
+}
+
+void displayLargeTimeWithSeconds() {
+  static char currentTimeStr[timeStringSize];
+  
+  uint8_t characterWidth;
+  uint8_t characterHeight;
+  
+  int displayColumn = 0;
+  int displayRow = 0;
+  
+  strcpy(currentTimeStr,"");
+  timeString(currentTimeStr, timeStringSize, 
+              true,   // showLocalTime
+              false,  // show24Hour
+              false,  // showTimeZone
+              true,   // showSeconds
+              true,   // military
+              false); // flashColons
+
+//      Serial.println("displayLargeTimeWithSeconds");
+  mx.setFont(boldFont);
+  displayColumn = 0;
+  displayRow = 0;
+  characterHeight = mx.getFontHeight();
+
+  for (int i=0; i<4; i++) {
+    displayColumn += overlayCharacter(currentTimeStr[i],displayColumn,displayRow)+1;
+  }
+  
+  mx.setFont(threeByFiveFont);
+  characterHeight = mx.getFontHeight();
+  for (int i=4; i<6; i++) {
+    displayColumn += overlayCharacter(currentTimeStr[i],displayColumn,displayRow)+1;
+  }
+}
+
+// End of time display functions
 
 // DHT Sensor 
 #include <dhtnew.h>
@@ -353,7 +484,8 @@ uint8_t timeFormat = 0;
 #define timeFormatRTC 3
 #define timeFormatRTCdate 4
 #define timeFormatRTCtemp 5
-#define timeFormatCount 6
+#define timeFormatScroll 6
+#define timeFormatCount 7
 
 void timeFormatIncrement() {
   timeFormat = (timeFormat + 1) % timeFormatCount;
@@ -362,7 +494,7 @@ void timeFormatIncrement() {
 void getTimeString(char *str, size_t maxsize) {
   switch (timeFormat) {
     case timeFormatLocal12:
-      timeString(str, maxsize, true, false, false, true, false, true);
+      timeString(str, maxsize, true, false, false, true, false, false);
 //                bool showLocalTime, 
 //                bool show24Hour, 
 //                bool showTimeZone, 
@@ -386,6 +518,20 @@ void getTimeString(char *str, size_t maxsize) {
       rtcString(str, maxsize, false, false);
       break;
   }  
+}
+
+void displayTimeString() {
+  switch (timeFormat) {
+    case timeFormatScroll:
+      displayScrollingTime();
+      break;
+    case timeFormatLocal12:
+      displayLargeTimeWithSeconds();
+      break;
+      
+    default:
+      break;
+  }
 }
 
 //void rtcString(char *timeStr, 
@@ -420,6 +566,10 @@ void getDHTString(char *str, size_t maxsize) {
   }  
 }
 
+void invertPoint(uint8_t r, uint8_t c) {
+  mx.setPoint(r,c,!mx.getPoint(r,c));
+}
+
 void displayLoop() {
   mx.clear();
   
@@ -427,17 +577,23 @@ void displayLoop() {
   strcpy(displayStr,"");
   switch (menuState) {
     case menuStateNormal:
-      getTimeString(displayStr, sizeof displayStr);
+      displayTimeString();
       break;
     case menuStateDHT:
       getDHTString(displayStr, sizeof displayStr);
+      printOver(displayStr, -1, 0);
       break;
     case menuStateSelect:
-      getTimeString(displayStr, sizeof displayStr);
+      displayTimeString();
       break;
   }
 
-  printOver(displayStr, -1, 0);
+  if (menuState == menuStateSelect) {
+    invertPoint(0,0);
+    invertPoint(0,31);
+    invertPoint(7,0);
+    invertPoint(7,31);
+  }
   mx.update();
 }
 
@@ -499,7 +655,7 @@ void setup() {
   // setup the matrix
   mx.begin();
   mx.control(MD_MAX72XX::INTENSITY,0);
-  mx.setFont(fourWide);
+  mx.setFont(fourBySixFont);
 
   buttonSetup();
 
@@ -521,7 +677,7 @@ void loop() {
 
   // my code starts here
   if (matrixTestComplete) {
-    if (millis() > millisLastDisplay+ 100) {
+    if (millis() > millisLastDisplay + DELAYTIME) {
       millisLastDisplay = millis();
       displayLoop();
     }
