@@ -1,9 +1,24 @@
 
-#include <Wire.h>   // for I2C protocol
-#include <ds3231.h>
-
 // For testing
 #define  DELAYTIME  0  // in milliseconds
+
+void debugPrintStr(char *current) {
+  static char last[80];
+
+  if (strcmp(last,current) != 0) {
+    Serial.println(current);
+    strcpy(last,current);
+  }
+}
+
+void debugPrintUint(uint32_t current) {
+  static uint32_t last;
+
+  if (last != current) {
+    Serial.println(current);
+    last = current;
+  }
+}
 
 
 #define TZ              -8       // (utc + TZ in hours)
@@ -110,7 +125,59 @@ void printOver(char *str, int8_t startColumn, int8_t startRow) {
 
 // end of font/print handling
 
+//  Real Time Clock (rtc) handling
+// Will assume UTC for rtc
+#include <Wire.h>   // for I2C protocol
 
+//#define CONFIG_UNIXTIME
+#include <ds3231.h>
+
+void rtcSetup() {
+  DS3231_init(DS3231_INTCN); //register the ds3231
+}
+
+time_t rtcGet() {
+  static ts t;             // rtc time structure
+  static tmElements_t te;  // time elements structure
+  static time_t unixTime;  // unix timestamp
+
+  DS3231_get(&t);
+
+  te.Year = t.year - 1970;
+  te.Month = t.mon;
+  te.Day = t.mday;
+  te.Hour = t.hour;
+  te.Minute = t.min;
+  te.Second = t.sec;
+
+  unixTime = makeTime(te);
+
+  return unixTime;
+}
+
+void rtcSync() {
+  time_t ntpTime;   // unix timestamp
+  tmElements_t te;  // time elements structure
+  ts t;             // rtc time structure
+
+  ntpTime = __nw_time_service.get_ntp_time();
+  breakTime(ntpTime, te);
+  
+  t.year = te.Year + 1970;
+  t.mon = te.Month;
+  t.mday = te.Day;
+  t.hour = te.Hour;
+  t.min = te.Minute;
+  t.sec = te.Second;
+
+  DS3231_set(t);
+}
+
+float rtcTemperature() {
+  return DS3231_get_treg();
+}
+
+// end rtc handling
 
 bool matrixTestComplete = false;
 void matrixTest() {
@@ -168,8 +235,9 @@ void timeString(char *timeStr,
                 bool show24Hour, 
                 bool showTimeZone, 
                 bool showSeconds,
-                bool military,
-                bool flashColons) {
+                bool showColons,
+                bool flashColons,
+                bool showAMPM) {
   time_t utcTime;
   time_t localTime;
   TimeChangeRule *tcr;        // pointer to the time change rule, use to get TZ abbrev
@@ -178,7 +246,8 @@ void timeString(char *timeStr,
   uint8_t currentSecond;
   unsigned long currentMilliSeconds;
 
-  utcTime = __nw_time_service.get_ntp_time();
+//  utcTime = __nw_time_service.get_ntp_time();
+  utcTime = rtcGet();
   
   static uint8_t lastSecond = 60;
   static unsigned long millisLastSecondChange = 0;
@@ -199,11 +268,11 @@ void timeString(char *timeStr,
   }
 
 // Now build a format string
-  char timeFormat[20] = "";
+  char timeFormatStr[20] = "";
 
   
   char colonChar[2] = "";
-  if(!military) {
+  if(showColons) {
     if (flashColons && (currentMilliSeconds < 500)) {
       strcat(colonChar," ");
     } else {
@@ -213,21 +282,26 @@ void timeString(char *timeStr,
 
 
   if (show24Hour) {
-    strcat(timeFormat,"%H");
+    strcat(timeFormatStr,"%H");
   } else {
-    strcat(timeFormat,"%l");    
+    strcat(timeFormatStr,"%l");    
   }
 
-  strcat(timeFormat,colonChar);
-  strcat(timeFormat,"%M");
+  strcat(timeFormatStr,colonChar);
+  strcat(timeFormatStr,"%M");
 
   if (showSeconds) {
-    strcat(timeFormat,colonChar);
-    strcat(timeFormat,"%S");
+    strcat(timeFormatStr,colonChar);
+    strcat(timeFormatStr,"%S");
+  }
+
+  if (showAMPM) {
+    strcat(timeFormatStr,"%p");
   }
 
 // Print the time string
-  strftime(timeStr, maxsize, timeFormat, timeStruct); 
+  strftime(timeStr, maxsize, timeFormatStr, timeStruct); 
+
 
 // replace a leading space with our special mono-spaced space
   if(timeStr[0] == ' ') {
@@ -236,7 +310,6 @@ void timeString(char *timeStr,
 
 // append the timezone
   if (showTimeZone) {
-    strcat(timeStr, " ");
     strcat(timeStr, timeZoneString);
   }
 }
@@ -274,7 +347,8 @@ void displayScrollingTime() {
   }
   
   strcpy(currentTimeStr,"");
-  getTimeString(currentTimeStr, timeStringSize);
+  timeString(currentTimeStr, timeStringSize, true, true, false, true, false, true, false);
+//  getTimeString(currentTimeStr, timeStringSize);
 
 //      Serial.println("timeFormatLocal12");
 //      mx.setFont(fourBySixFont);
@@ -349,8 +423,9 @@ void displayScrollingTime() {
   }
 }
 
-void displayLargeTimeWithSeconds() {
-  static char currentTimeStr[timeStringSize];
+// Displays the first 4 characters, assumed to be hour and minute, in big bold numbers
+// Next 2 characters are displayed in smaller 3x5 font
+void displayBoldTime(char *currentTimeStr) {
   
   uint8_t characterWidth;
   uint8_t characterHeight;
@@ -358,16 +433,6 @@ void displayLargeTimeWithSeconds() {
   int displayColumn = 0;
   int displayRow = 0;
   
-  strcpy(currentTimeStr,"");
-  timeString(currentTimeStr, timeStringSize, 
-              true,   // showLocalTime
-              false,  // show24Hour
-              false,  // showTimeZone
-              true,   // showSeconds
-              true,   // military
-              false); // flashColons
-
-//      Serial.println("displayLargeTimeWithSeconds");
   mx.setFont(boldFont);
   displayColumn = 0;
   displayRow = 0;
@@ -439,6 +504,7 @@ void buttonSetup() {
   );
   button.attachClick(menuSingleClick);
   button.attachLongPressStart(menuLongClick);
+  button.attachDoubleClick(rtcSync);
 }
 
 uint8_t tempCounter = 0;
@@ -478,56 +544,110 @@ void menuLongClick() {
 }
 
 uint8_t timeFormat = 0;
-#define timeFormatLocal12 0
-#define timeFormatLocal24 1
-#define timeFormatUTC 2
-#define timeFormatRTC 3
-#define timeFormatRTCdate 4
-#define timeFormatRTCtemp 5
-#define timeFormatScroll 6
-#define timeFormatCount 7
+#define timeFormatLocalSeconds 0
+#define timeFormatLocalAMPM 1
+#define timeFormatLocalTimeZone 2
+#define timeFormatLocal24Seconds 3
+#define timeFormatLocal24TimeZone 4
+#define timeFormatUTCSeconds 5
+#define timeFormatUTCTimeZone 6
+#define timeFormatScroll 7
+#define timeFormatCount 8
 
 void timeFormatIncrement() {
   timeFormat = (timeFormat + 1) % timeFormatCount;
 }
 
-void getTimeString(char *str, size_t maxsize) {
-  switch (timeFormat) {
-    case timeFormatLocal12:
-      timeString(str, maxsize, true, false, false, true, false, false);
-//                bool showLocalTime, 
-//                bool show24Hour, 
-//                bool showTimeZone, 
-//                bool showSeconds,
-//                bool military,
-//                bool flashColons)      
-      break;
-    case timeFormatLocal24:
-      timeString(str, maxsize, true, true, false, true, false, true);
-      break;
-    case timeFormatUTC:
-      timeString(str, maxsize, false, true, false, true, true, true);
-      break;
-    case timeFormatRTC:
-      rtcString(str, maxsize, true, false);
-      break;
-    case timeFormatRTCdate:
-      rtcString(str, maxsize, false, true);
-      break;
-    case timeFormatRTCtemp:
-      rtcString(str, maxsize, false, false);
-      break;
-  }  
-}
-
 void displayTimeString() {
+  static char currentTimeStr[timeStringSize];
+
   switch (timeFormat) {
+    case timeFormatLocalSeconds:
+      timeString(currentTimeStr, timeStringSize, 
+                  true,   // showLocalTime
+                  false,  // show24Hour
+                  false,  // showTimeZone
+                  true,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  false); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+
+    case timeFormatLocalAMPM:
+      timeString(currentTimeStr, timeStringSize, 
+                  true,   // showLocalTime
+                  false,  // show24Hour
+                  false,  // showTimeZone
+                  false,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  true); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+      
+    case timeFormatLocalTimeZone:
+      timeString(currentTimeStr, timeStringSize, 
+                  true,   // showLocalTime
+                  false,  // show24Hour
+                  true,  // showTimeZone
+                  false,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  false); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+      
+    case timeFormatLocal24Seconds:
+      timeString(currentTimeStr, timeStringSize, 
+                  true,   // showLocalTime
+                  true,  // show24Hour
+                  false,  // showTimeZone
+                  true,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  false); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+
+    case timeFormatLocal24TimeZone:
+      timeString(currentTimeStr, timeStringSize, 
+                  true,   // showLocalTime
+                  true,  // show24Hour
+                  true,  // showTimeZone
+                  false,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  false); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+      
+    case timeFormatUTCSeconds:
+      timeString(currentTimeStr, timeStringSize, 
+                  false,   // showLocalTime
+                  true,  // show24Hour
+                  false,  // showTimeZone
+                  true,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  false); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+      
+    case timeFormatUTCTimeZone:
+      timeString(currentTimeStr, timeStringSize, 
+                  false,   // showLocalTime
+                  true,  // show24Hour
+                  true,  // showTimeZone
+                  false,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  false); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+      
     case timeFormatScroll:
       displayScrollingTime();
-      break;
-    case timeFormatLocal12:
-      displayLargeTimeWithSeconds();
-      break;
       
     default:
       break;
