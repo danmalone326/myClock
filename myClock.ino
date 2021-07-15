@@ -1,6 +1,6 @@
 
 // For testing
-#define  DELAYTIME  0  // in milliseconds
+#define  DELAYTIME  000  // in milliseconds
 
 void debugPrintStr(char *current) {
   static char last[80];
@@ -128,18 +128,17 @@ void printOver(char *str, int8_t startColumn, int8_t startRow) {
 //  Real Time Clock (rtc) handling
 // Will assume UTC for rtc
 #include <Wire.h>   // for I2C protocol
-
-//#define CONFIG_UNIXTIME
 #include <ds3231.h>
 
 void rtcSetup() {
-  DS3231_init(DS3231_INTCN); //register the ds3231
+  Wire.begin(); // starting I2C for RTC
+  DS3231_init(DS3231_INTCN); //register the ds3231 at the default address
 }
 
 time_t rtcGet() {
-  static ts t;             // rtc time structure
-  static tmElements_t te;  // time elements structure
-  static time_t unixTime;  // unix timestamp
+  ts t;             // rtc time structure
+  tmElements_t te;  // time elements structure
+  time_t unixTime;  // unix timestamp
 
   DS3231_get(&t);
 
@@ -158,7 +157,19 @@ time_t rtcGet() {
 void rtcSync() {
   time_t ntpTime;   // unix timestamp
   tmElements_t te;  // time elements structure
-  ts t;             // rtc time structure
+  static ts t;             // rtc time structure
+  time_t unixTime;  // unix timestamp
+
+  DS3231_get(&t);
+
+  te.Year = t.year - 1970;
+  te.Month = t.mon;
+  te.Day = t.mday;
+  te.Hour = t.hour;
+  te.Minute = t.min;
+  te.Second = t.sec;
+
+  unixTime = makeTime(te);
 
   ntpTime = __nw_time_service.get_ntp_time();
   breakTime(ntpTime, te);
@@ -169,6 +180,9 @@ void rtcSync() {
   t.hour = te.Hour;
   t.min = te.Minute;
   t.sec = te.Second;
+
+//  Serial.println(unixTime);
+//  Serial.println(ntpTime);
 
   DS3231_set(t);
 }
@@ -204,29 +218,6 @@ void matrixTest() {
     mx.clear();
   }
 }
-
-// get time from RTC and format
-void rtcString(char *timeStr, 
-               size_t maxsize, 
-               bool showTime,
-               bool showDate) {
-  static ts t; // time struct
-  static float treg;
-  DS3231_get(&t);
-  treg = DS3231_get_treg();
-
-
-  if (showTime) {
-    sprintf(timeStr,"%d:%d:%d", t.hour,t.min,t.sec);
-  } else if (showDate) {
-    sprintf(timeStr,"%d/%d/%d", t.mon,t.mday,t.year);    
-  } else {
-    sprintf(timeStr,"%f", treg);    
-  }
-  
-  return;
-}
-
 
 // get current time in a format based on the parameters
 void timeString(char *timeStr, 
@@ -314,7 +305,7 @@ void timeString(char *timeStr,
   }
 }
 
-// Various Time Display functions
+// Various Time/Temp Display functions
 #define timeStringSize 20
 #define scrollDuration 200
 #define scrollGap 75
@@ -449,47 +440,28 @@ void displayBoldTime(char *currentTimeStr) {
   }
 }
 
-// End of time display functions
+// Displays the string in big bold characters
+void displayBold(char *str) {
+  
+  uint8_t characterWidth;
+  uint8_t characterHeight;
+  
+  int displayColumn = 0;
+  int displayRow = 0;
 
-// DHT Sensor 
-#include <dhtnew.h>
-#define dhtSensorPin D3
-DHTNEW dhtSensor(dhtSensorPin);
-#define dhtDelayMillis 2000
+  mx.setFont(boldFont);
+  displayColumn = 0;
+  displayRow = 0;
+  characterHeight = mx.getFontHeight();
 
-float dhtHumidity = 0.0;
-float dhtTemperature = 0.0;
-float dhtTemperatureF = 0.0;
-
-void dhtRead() {
-  static unsigned long dhtLastMillis = 0;
-  if ((millis() >= dhtLastMillis + dhtDelayMillis) || (millis() < dhtLastMillis)) {
-    dhtLastMillis = millis();
-    int chk = dhtSensor.read();
-    dhtHumidity = dhtSensor.getHumidity();
-    dhtTemperature = dhtSensor.getTemperature();
-    dhtTemperatureF = (dhtTemperature * 9 / 5) + 32;
+  for (int i=0; i<strlen(str); i++) {
+    displayColumn += overlayCharacter(str[i],displayColumn,displayRow)+1;
   }
 }
 
-void dhtTemperatureString(char *str) {
-  sprintf(str,"%c%.0f%cC", (char)150, dhtTemperature, (char)144);
-}
 
-void dhtTemperatureFString(char *str) {
-  if (dhtTemperatureF < 100.0) {
-    sprintf(str,"%c%.0f%cF", (char)150, dhtTemperatureF, (char)144);
-  } else {
-    sprintf(str,"%.0f%cF", dhtTemperatureF, (char)144);      
-  }
-}
+// End of time/temp display functions
 
-void dhtHumidityString(char *str) {
-  sprintf(str,"%.1f%%", dhtHumidity);
-}
-
-
-// end of DHT Sensor
 
 // Choose what to display based on settings/button
 #include <OneButton.h>
@@ -544,8 +516,8 @@ void menuLongClick() {
 }
 
 uint8_t timeFormat = 0;
-#define timeFormatLocalSeconds 0
-#define timeFormatLocalAMPM 1
+#define timeFormatLocalAMPM 0
+#define timeFormatLocalSeconds 1
 #define timeFormatLocalTimeZone 2
 #define timeFormatLocal24Seconds 3
 #define timeFormatLocal24TimeZone 4
@@ -559,21 +531,9 @@ void timeFormatIncrement() {
 }
 
 void displayTimeString() {
-  static char currentTimeStr[timeStringSize];
+  static char currentTimeStr[timeStringSize]; // needs to be static because we are passing ptr as parameter?
 
   switch (timeFormat) {
-    case timeFormatLocalSeconds:
-      timeString(currentTimeStr, timeStringSize, 
-                  true,   // showLocalTime
-                  false,  // show24Hour
-                  false,  // showTimeZone
-                  true,   // showSeconds
-                  false,  // showColons
-                  false,  // flashColons
-                  false); // showAMPM
-      displayBoldTime(currentTimeStr);
-      break;
-
     case timeFormatLocalAMPM:
       timeString(currentTimeStr, timeStringSize, 
                   true,   // showLocalTime
@@ -586,6 +546,18 @@ void displayTimeString() {
       displayBoldTime(currentTimeStr);
       break;
       
+    case timeFormatLocalSeconds:
+      timeString(currentTimeStr, timeStringSize, 
+                  true,   // showLocalTime
+                  false,  // show24Hour
+                  false,  // showTimeZone
+                  true,   // showSeconds
+                  false,  // showColons
+                  false,  // flashColons
+                  false); // showAMPM
+      displayBoldTime(currentTimeStr);
+      break;
+
     case timeFormatLocalTimeZone:
       timeString(currentTimeStr, timeStringSize, 
                   true,   // showLocalTime
@@ -654,37 +626,47 @@ void displayTimeString() {
   }
 }
 
-//void rtcString(char *timeStr, 
-//               size_t maxsize, 
-//               bool showTime,
-//               bool showDate) {
-
 // Display duration for temp and humidity in milliseconds
 #define displayTempDuration 6000
-void getDHTString(char *str, size_t maxsize) {
+#define temperatureStringSize 20
+void displayTemperature() {
   static bool active = false;
   static unsigned long startMillis = 0;
 
-  dhtRead();
+  float temperature = rtcTemperature();
+  static char temperatureString[temperatureStringSize];
+  char temperatureUnit;
 
+  // start timer for short duration display
   if (!active) {
     active = true;
     startMillis = millis();
   }
 
+  // This switches between the 2 states C and F, 3rd state is to reset the menu
   switch ((millis() - startMillis) / (displayTempDuration/2)) {
     case 0:
-      dhtTemperatureFString(str);
+      temperatureUnit = 'C';
       break;
     case 1:
-      dhtHumidityString(str);
-      break;
+      temperature = (temperature * 9 / 5) + 32;
+      temperatureUnit = 'F';
+     break;
     case 2:
       active = false;
       menuState = menuStateNormal;
-      break;
+      return;
   }  
+
+  if (temperature < 100.0) {
+    sprintf(temperatureString,"%c%.0f%c%c", (char)150, temperature, (char)144, temperatureUnit);
+  } else {
+    sprintf(temperatureString,"%.0f%c%c", temperature, (char)144, temperatureUnit);      
+  }
+
+  displayBold(temperatureString);
 }
+
 
 void invertPoint(uint8_t r, uint8_t c) {
   mx.setPoint(r,c,!mx.getPoint(r,c));
@@ -700,8 +682,7 @@ void displayLoop() {
       displayTimeString();
       break;
     case menuStateDHT:
-      getDHTString(displayStr, sizeof displayStr);
-      printOver(displayStr, -1, 0);
+      displayTemperature();
       break;
     case menuStateSelect:
       displayTimeString();
@@ -769,8 +750,7 @@ void setup() {
   EwStack.initialize();
   __nw_time_service.init_ntp_time();
 
-  Wire.begin(); // starting I2C for RTC
-  DS3231_init(DS3231_INTCN); //register the ds3231 at the default address
+  rtcSetup();
 
   // setup the matrix
   mx.begin();

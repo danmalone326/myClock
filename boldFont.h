@@ -143,7 +143,7 @@ const MD_MAX72XX::fontType_t boldFont[] PROGMEM = {
     0, // char 141
     0, // char 142
     0, // char 143
-    0, // char 144
+    3, 14, 10, 14, // char 144    - 'Degree'
     0, // char 145
     0, // char 146
     0, // char 147
