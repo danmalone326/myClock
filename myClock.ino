@@ -21,6 +21,7 @@ void debugPrintUint(uint32_t current) {
 }
 
 
+// Framework 
 #define TZ              -8       // (utc + TZ in hours)
 #define TZ_MN           ((TZ)*60)
 #define TZ_SEC          ((TZ)*3600)
@@ -28,6 +29,17 @@ void debugPrintUint(uint32_t current) {
 #define DST_SEC         ((DST_MN)*60)
 //#include <EwingsEsp8266Stack.h>
 #include <EwingsEspStack.h>
+bool wifiIsConnected = false;
+void frameworkSetup() {
+  EwStack.initialize();
+  __nw_time_service.init_ntp_time();
+  __event_service.add_event_listener(EVENT_WIFI_STA_GOT_IP,[&](void*sta_connected) {  wifiIsConnected = true; } );
+  __event_service.add_event_listener(EVENT_WIFI_STA_DISCONNECTED, [&](void*sta_connected) {  wifiIsConnected = false; } );
+}
+
+// end Framework
+
+
 
 #include <Timezone.h>   // https://github.com/JChristensen/Timezone
 // US Pacific Time Zone (New York, Detroit)
@@ -130,6 +142,8 @@ void printOver(char *str, int8_t startColumn, int8_t startRow) {
 #include <Wire.h>   // for I2C protocol
 #include <ds3231.h>
 
+bool rtcReadError = false;
+
 void rtcSetup() {
   Wire.begin(); // starting I2C for RTC
   DS3231_init(DS3231_INTCN); //register the ds3231 at the default address
@@ -149,27 +163,39 @@ time_t rtcGet() {
   te.Minute = t.min;
   te.Second = t.sec;
 
-  unixTime = makeTime(te);
+//  Serial.println(t.mon);
+  if (t.year == 2165) { // Error reading rtc, use ntp time
+    rtcReadError = true;
+    unixTime = __nw_time_service.get_ntp_time();
+  } else {
+    rtcReadError = false;
+    unixTime = makeTime(te);
+  }
 
   return unixTime;
+}
+
+bool rtcIsInSync() {
+  time_t ntpTime;         // ntp timestamp
+  time_t rtcTimeBefore;   // rtc timestamp before
+  time_t rtcTimeAfter;    // rtc timestamp after
+  long diffBefore;
+  long diffAfter;
+
+  rtcTimeBefore = rtcGet();
+  ntpTime = __nw_time_service.get_ntp_time();
+  rtcTimeAfter = rtcGet();
+
+  diffBefore = abs(rtcTimeBefore - ntpTime);
+  diffAfter = abs(rtcTimeAfter - ntpTime);
+
+  return ((!rtcReadError) && ((diffBefore < 2) || (diffAfter < 2)));
 }
 
 void rtcSync() {
   time_t ntpTime;   // unix timestamp
   tmElements_t te;  // time elements structure
   static ts t;             // rtc time structure
-  time_t unixTime;  // unix timestamp
-
-  DS3231_get(&t);
-
-  te.Year = t.year - 1970;
-  te.Month = t.mon;
-  te.Day = t.mday;
-  te.Hour = t.hour;
-  te.Minute = t.min;
-  te.Second = t.sec;
-
-  unixTime = makeTime(te);
 
   ntpTime = __nw_time_service.get_ntp_time();
   breakTime(ntpTime, te);
@@ -180,9 +206,6 @@ void rtcSync() {
   t.hour = te.Hour;
   t.min = te.Minute;
   t.sec = te.Second;
-
-//  Serial.println(unixTime);
-//  Serial.println(ntpTime);
 
   DS3231_set(t);
 }
@@ -689,12 +712,30 @@ void displayLoop() {
       break;
   }
 
+  if (!wifiIsConnected) {
+    invertPoint(0,30);
+  }
+
+  if (!__nw_time_service.is_valid_ntptime()) {
+    invertPoint(0,29);    
+  }
+
+  if (!rtcIsInSync()) {
+    invertPoint(0,28);
+  }
+
+  if (rtcReadError) {
+    invertPoint(0,27);    
+  }
+
+
   if (menuState == menuStateSelect) {
     invertPoint(0,0);
     invertPoint(0,31);
     invertPoint(7,0);
     invertPoint(7,31);
   }
+  
   mx.update();
 }
 
@@ -744,11 +785,30 @@ void arduinoOtaSetup() {
 // end of OTA handler
 
 
+void tester() {
+  unsigned long a = 1;
+  unsigned long b = 2;
+  long c;
+
+  Serial.println("tester");
+  
+  Serial.println(a);
+  Serial.println(b);
+  c=abs(a-b);
+  Serial.println(c);
+  c=abs(b-a);
+  Serial.println(c);
+  
+  Serial.println("tester");
+}
+
 void setup() {
   Serial.begin(115200);
 
-  EwStack.initialize();
-  __nw_time_service.init_ntp_time();
+
+  frameworkSetup();
+
+//  tester();
 
   rtcSetup();
 
