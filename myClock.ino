@@ -163,10 +163,9 @@ time_t rtcGet() {
   te.Minute = t.min;
   te.Second = t.sec;
 
-//  Serial.println(t.mon);
   if (t.year == 2165) { // Error reading rtc, use ntp time
     rtcReadError = true;
-    unixTime = __nw_time_service.get_ntp_time();
+    unixTime = 0;
   } else {
     rtcReadError = false;
     unixTime = makeTime(te);
@@ -214,7 +213,43 @@ float rtcTemperature() {
   return DS3231_get_treg();
 }
 
+time_t timeGet() {
+  time_t unixTime;  // unix timestamp
+
+  unixTime = rtcGet();
+
+  if (rtcReadError && __nw_time_service.is_valid_ntptime()) { // Error reading rtc, use ntp time
+    unixTime = __nw_time_service.get_ntp_time();
+  }
+
+  return unixTime;
+}
+
+
 // end rtc handling
+
+// DHT Sensor 
+#include <dhtnew.h>
+#define dhtSensorPin D3
+DHTNEW dhtSensor(dhtSensorPin);
+#define dhtDelayMillis 2000
+
+float dhtHumidity = 0.0;
+float dhtTemperature = 0.0;
+float dhtTemperatureF = 0.0;
+
+void dhtRead() {
+  static unsigned long dhtLastMillis = 0;
+  if ((millis() >= dhtLastMillis + dhtDelayMillis) || (millis() < dhtLastMillis)) {
+    dhtLastMillis = millis();
+    int chk = dhtSensor.read();
+    dhtHumidity = dhtSensor.getHumidity();
+    dhtTemperature = dhtSensor.getTemperature();
+    dhtTemperatureF = (dhtTemperature * 9 / 5) + 32;
+  }
+}
+
+// end DHT Sensor
 
 bool matrixTestComplete = false;
 void matrixTest() {
@@ -261,7 +296,7 @@ void timeString(char *timeStr,
   unsigned long currentMilliSeconds;
 
 //  utcTime = __nw_time_service.get_ntp_time();
-  utcTime = rtcGet();
+  utcTime = timeGet();
   
   static uint8_t lastSecond = 60;
   static unsigned long millisLastSecondChange = 0;
@@ -656,9 +691,12 @@ void displayTemperature() {
   static bool active = false;
   static unsigned long startMillis = 0;
 
-  float temperature = rtcTemperature();
   static char temperatureString[temperatureStringSize];
+  bool isTemp;
+  float temperature;
   char temperatureUnit;
+
+  dhtRead();
 
   // start timer for short duration display
   if (!active) {
@@ -669,23 +707,41 @@ void displayTemperature() {
   // This switches between the 2 states C and F, 3rd state is to reset the menu
   switch ((millis() - startMillis) / (displayTempDuration/2)) {
     case 0:
+      temperature = dhtTemperature;
       temperatureUnit = 'C';
+      isTemp = true;
       break;
     case 1:
-      temperature = (temperature * 9 / 5) + 32;
+      temperature = dhtTemperatureF;
       temperatureUnit = 'F';
+      isTemp = true;
      break;
     case 2:
+      temperature = (rtcTemperature() * 9 / 5) + 32;
+      temperatureUnit = 'F';
+      isTemp = true;
+     break;
+    case 3:
+      sprintf(temperatureString,"%3.0f%%", dhtHumidity);      
+      // replace a leading space with our special mono-spaced space
+      if(temperatureString[0] == ' ') {
+        temperatureString[0] = 150;
+      }
+      isTemp = false;
+     break;
+    default:
       active = false;
       menuState = menuStateNormal;
       return;
   }  
 
-  if (temperature < 100.0) {
-    sprintf(temperatureString,"%c%.0f%c%c", (char)150, temperature, (char)144, temperatureUnit);
-  } else {
-    sprintf(temperatureString,"%.0f%c%c", temperature, (char)144, temperatureUnit);      
-  }
+  if (isTemp) {
+    if (temperature < 100.0) {
+      sprintf(temperatureString,"%c%.0f%c%c", (char)150, temperature, (char)144, temperatureUnit);
+    } else {
+      sprintf(temperatureString,"%.0f%c%c", temperature, (char)144, temperatureUnit);      
+    }
+  } 
 
   displayBold(temperatureString);
 }
