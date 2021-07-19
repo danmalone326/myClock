@@ -31,10 +31,10 @@ void debugPrintUint(uint32_t current) {
 #include <EwingsEspStack.h>
 bool wifiIsConnected = false;
 void frameworkSetup() {
-  EwStack.initialize();
-  __nw_time_service.init_ntp_time();
   __event_service.add_event_listener(EVENT_WIFI_STA_GOT_IP,[&](void*sta_connected) {  wifiIsConnected = true; } );
   __event_service.add_event_listener(EVENT_WIFI_STA_DISCONNECTED, [&](void*sta_connected) {  wifiIsConnected = false; } );
+  EwStack.initialize();
+  __nw_time_service.init_ntp_time();
 }
 
 // end Framework
